@@ -1,0 +1,5 @@
+inventories/prod/*
+!inventories/prod/.gitkeep
+
+playbooks/files/docker-config.json
+!playbooks/files/.gitkeep

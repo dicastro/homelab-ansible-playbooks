@@ -1,0 +1,109 @@
+---
+- name: Install Docker and configure log rotation
+  hosts: all
+  become: yes
+  vars:
+    docker_log_options:
+      max_size: "10m"
+      max_file: "3"
+    docker_login_file: "docker-config.json"  # Path to your login config file on Ansible control node
+    docker_login_dest: "/root/.docker/config.json"  # Destination on remote hosts
+
+  tasks:
+    - name: Gather Ubuntu distribution facts
+      ansible.builtin.setup:
+        gather_subset:
+          - distribution
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Ensure keyrings directory exists
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Check if Docker GPG key is already installed
+      stat:
+        path: /etc/apt/keyrings/docker-archive-keyring.gpg
+      register: docker_gpg_key
+
+    - name: Download Docker's GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /tmp/docker-archive-keyring.gpg
+        mode: '0644'
+      when: not docker_gpg_key.stat.exists
+
+    - name: Convert GPG key to binary format
+      command:
+        cmd: gpg --dearmor -o /etc/apt/keyrings/docker-archive-keyring.gpg /tmp/docker-archive-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/docker-archive-keyring.gpg
+
+    - name: Remove temporary GPG key
+      file:
+        path: /tmp/docker-archive-keyring.gpg
+        state: absent
+
+    - name: Set up the Docker stable repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_facts.lsb.codename | lower  }} stable"
+        state: present
+
+    - name: Install Docker and Docker Compose
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - docker-compose
+          - containerd.io
+        state: present
+
+    - name: Install Docker Compose plugin
+      ansible.builtin.apt:
+        name: docker-compose-plugin
+        state: present
+
+    - name: Configure Docker log rotation
+      copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "{{ docker_log_options.max_size }}",
+              "max-file": "{{ docker_log_options.max_file }}"
+            }
+          }
+      notify: Restart Docker
+
+    - name: Create docker configuration folder
+      ansible.builtin.file:
+        path: "{{ docker_login_dest | dirname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy Docker login configuration
+      ansible.builtin.copy:
+        src: "{{ docker_login_file }}"
+        dest: "{{ docker_login_dest }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+  handlers:
+    - name: Restart Docker
+      service:
+        name: docker
+        state: restarted
