@@ -8,6 +8,7 @@
       max_file: "3"
     docker_login_file: "docker-config.json"  # Path to your login config file on Ansible control node
     docker_login_dest: "/root/.docker/config.json"  # Destination on remote hosts
+    docker_certs_dir: "/etc/docker/certs"
 
   tasks:
     - name: Gather Ubuntu distribution facts
@@ -75,7 +76,45 @@
         name: docker-compose-plugin
         state: present
 
-    - name: Configure Docker log rotation
+    - name: Generate signed certificate for Docker
+      ansible.builtin.command:
+        cmd: >
+          python {{ playbook_dir }}/../../homelab-certificate-tools/generate-signed-certificate.py
+          --ca-alias dicalab
+          --ca-cn "dicalab root ca"
+          --signed-alias "docker-daemon-{{ inventory_hostname }}"
+          --signed-cn "{{ inventory_hostname }}.dicalab.com"
+          --signed-san-ip {{ ansible_host }}
+          --output-format ansible
+      register: signed_cert_output
+      changed_when: signed_cert_output.stdout | from_json | json_query('changed')
+
+    - name: Parse output of signed certificate generation
+      ansible.builtin.set_fact:
+        ca_crt_path: "{{ (signed_cert_output.stdout | from_json).details['ca-crt-path'] }}"
+        signed_crt_path: "{{ (signed_cert_output.stdout | from_json).details['signed-crt-path'] }}"
+        signed_key_path: "{{ (signed_cert_output.stdout | from_json).details['signed-key-path'] }}"
+      changed_when: false
+
+    - name: Ensure Docker certificates directory exists
+      ansible.builtin.file:
+        path: "{{ docker_certs_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy certificates to Docker directory
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+        mode: '0644'
+      loop:
+        - { src: "{{ ca_crt_path }}", dest: "{{ docker_certs_dir }}/ca.pem" }
+        - { src: "{{ signed_crt_path }}", dest: "{{ docker_certs_dir }}/server-crt.pem" }
+        - { src: "{{ signed_key_path }}", dest: "{{ docker_certs_dir }}/server-key.pem" }
+      notify: Restart Docker
+
+    - name: Configure Docker log rotation and TLS
       copy:
         dest: /etc/docker/daemon.json
         content: |
@@ -84,7 +123,13 @@
             "log-opts": {
               "max-size": "{{ docker_log_options.max_size }}",
               "max-file": "{{ docker_log_options.max_file }}"
-            }
+            },
+            "tls": true,
+            "tlsverify": true,
+            "tlscacert": "{{ docker_certs_dir }}/ca.pem",
+            "tlscert": "{{ docker_certs_dir }}/server-crt.pem",
+            "tlskey": "{{ docker_certs_dir }}/server-key.pem",
+            "hosts": ["tcp://0.0.0.0:2376", "unix:///var/run/docker.sock"]
           }
       notify: Restart Docker
 
