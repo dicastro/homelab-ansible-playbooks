@@ -81,6 +81,7 @@
       ansible.builtin.command:
         cmd: >
           python {{ certificate_tools_path }}/generate-signed-certificate.py
+          --base-path {{ certificate_tools_path }}
           --ca-alias dicalab
           --ca-cn "dicalab root ca"
           --signed-alias "docker-daemon-{{ inventory_hostname }}"
