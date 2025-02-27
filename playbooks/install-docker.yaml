@@ -88,6 +88,7 @@
           --output-format ansible
       register: signed_cert_output
       changed_when: signed_cert_output.stdout | from_json | json_query('changed')
+      delegate_to: localhost
 
     - name: Parse output of signed certificate generation
       ansible.builtin.set_fact:
