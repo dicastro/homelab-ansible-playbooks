@@ -9,6 +9,7 @@
     docker_login_file: "docker-config.json"  # Path to your login config file on Ansible control node
     docker_login_dest: "/root/.docker/config.json"  # Destination on remote hosts
     docker_certs_dir: "/etc/docker/certs"
+    certificate_tools_path: "{{ playbook_dir }}/../../homelab-certificate-tools"
 
   tasks:
     - name: Gather Ubuntu distribution facts
@@ -79,7 +80,7 @@
     - name: Generate signed certificate for Docker
       ansible.builtin.command:
         cmd: >
-          python {{ playbook_dir }}/../../homelab-certificate-tools/generate-signed-certificate.py
+          python {{ certificate_tools_path }}/generate-signed-certificate.py
           --ca-alias dicalab
           --ca-cn "dicalab root ca"
           --signed-alias "docker-daemon-{{ inventory_hostname }}"
@@ -87,14 +88,14 @@
           --signed-san-ip {{ ansible_host }}
           --output-format ansible
       register: signed_cert_output
-      changed_when: signed_cert_output.stdout | from_json | json_query('changed')
+      changed_when: (signed_cert_output.stdout | from_json).changed
       delegate_to: localhost
 
     - name: Parse output of signed certificate generation
       ansible.builtin.set_fact:
-        ca_crt_path: "{{ (signed_cert_output.stdout | from_json).details['ca-crt-path'] }}"
-        signed_crt_path: "{{ (signed_cert_output.stdout | from_json).details['signed-crt-path'] }}"
-        signed_key_path: "{{ (signed_cert_output.stdout | from_json).details['signed-key-path'] }}"
+        ca_crt_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['ca-crt-path'] }}"
+        signed_crt_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['signed-crt-path'] }}"
+        signed_key_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['signed-key-path'] }}"
       changed_when: false
 
     - name: Ensure Docker certificates directory exists
