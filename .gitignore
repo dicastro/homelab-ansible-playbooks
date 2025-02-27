@@ -1,3 +1,6 @@
+.venv
+.idea
+
 inventories/prod/*
 !inventories/prod/.gitkeep
 
