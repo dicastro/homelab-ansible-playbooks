@@ -94,9 +94,9 @@
 
     - name: Parse output of signed certificate generation
       ansible.builtin.set_fact:
-        ca_crt_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['ca-crt-path'] }}"
-        signed_crt_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['signed-crt-path'] }}"
-        signed_key_path: "{{ certificate_tools_path }}/{{ (signed_cert_output.stdout | from_json).details['signed-key-path'] }}"
+        ca_crt_path: "{{ (signed_cert_output.stdout | from_json).details['ca-crt-path'] }}"
+        signed_crt_path: "{{ (signed_cert_output.stdout | from_json).details['signed-crt-path'] }}"
+        signed_key_path: "{{ (signed_cert_output.stdout | from_json).details['signed-key-path'] }}"
       changed_when: false
 
     - name: Ensure Docker certificates directory exists
@@ -109,7 +109,6 @@
       ansible.builtin.copy:
         src: "{{ item.src }}"
         dest: "{{ item.dest }}"
-        remote_src: yes
         mode: '0644'
       loop:
         - { src: "{{ ca_crt_path }}", dest: "{{ docker_certs_dir }}/ca.pem" }
@@ -149,6 +148,26 @@
         owner: root
         group: root
         mode: "0600"
+
+    - name: Ensure Docker override directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Configure Docker systemd override
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/override.conf
+        content: |
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/dockerd --containerd=/run/containerd/containerd.sock
+        mode: "0644"
+      notify: Restart Docker
+
+    - name: Reload systemd to apply changes
+      ansible.builtin.systemd:
+        daemon_reload: yes
 
   handlers:
     - name: Restart Docker
